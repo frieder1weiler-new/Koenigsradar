@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Königs-Trend-Screener</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ["DM Sans", "ui-sans-serif", "system-ui"] },
+          colors: {
+            ink: "#0b1220",
+            panel: "#121a2b",
+            line: "#243049",
+            gold: "#d4a017",
+            mint: "#34d399"
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet">
+  <style>
+    body { background: radial-gradient(1200px 600px at 10% -10%, #1b2744 0%, #0b1220 45%); }
+    .card { background: linear-gradient(180deg, rgba(18,26,43,.96), rgba(12,18,32,.96)); }
+  </style>
+</head>
+<body class="font-sans text-slate-200 min-h-screen">
+  <header class="border-b border-line/80 sticky top-0 z-20 backdrop-blur bg-ink/80">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex flex-wrap items-center gap-3 justify-between">
+      <div>
+        <p class="text-gold text-xs tracking-[0.2em] uppercase">Max-Otte-Filter + BOTSI-RSL</p>
+        <h1 class="text-2xl font-bold text-white">Königs-Trend-Screener</h1>
+      </div>
+      <form method="post" action="{{ url_for('trigger_scan') }}">
+        <button type="submit"
+                class="px-4 py-2 rounded-lg bg-gold text-ink font-semibold hover:bg-yellow-400 disabled:opacity-50"
+                {% if scan_running %}disabled{% endif %}>
+          {% if scan_running %}Scan läuft …{% else %}Scan jetzt starten{% endif %}
+        </button>
+      </form>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for cat, msg in messages %}
+          <div class="rounded-lg px-4 py-3 {% if cat == 'ok' %}bg-emerald-900/50 text-emerald-200{% else %}bg-amber-900/50 text-amber-200{% endif %}">
+            {{ msg }}
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <article class="card rounded-2xl border border-line p-4">
+        <p class="text-slate-400 text-sm">Letzter Scan</p>
+        <p class="text-xl font-semibold mt-1">{{ scan.finished_at|ts if scan else "noch nie" }}</p>
+        <p class="text-sm mt-1 {% if scan and scan.status == 'ok' %}text-mint{% elif scan and scan.status == 'running' %}text-amber-300{% else %}text-rose-300{% endif %}">
+          {{ scan.status if scan else "bereit" }}{% if scan and scan.duration_sec %} · {{ "%.0f"|format(scan.duration_sec) }}s{% endif %}
+        </p>
+      </article>
+      <article class="card rounded-2xl border border-line p-4">
+        <p class="text-slate-400 text-sm">Nächster Auto-Scan</p>
+        <p class="text-xl font-semibold mt-1">{{ next_run or (scan_clock ~ " " ~ tz) }}</p>
+        <p class="text-sm text-slate-400 mt-1">täglich nach US-Close</p>
+      </article>
+      <article class="card rounded-2xl border border-line p-4">
+        <p class="text-slate-400 text-sm">Watchlist / Universum</p>
+        <p class="text-xl font-semibold mt-1">{{ watchlist_n }} Titel</p>
+        <p class="text-sm text-slate-400 mt-1">
+          {% if finished %}{{ finished.passed_koenig }} Königs · {{ finished.passed_trend }} Trend{% else %}noch keine Auswertung{% endif %}
+        </p>
+      </article>
+      <article class="card rounded-2xl border border-line p-4">
+        <p class="text-slate-400 text-sm">Benachrichtigung</p>
+        <p class="text-xl font-semibold mt-1">{% if notify_ok %}aktiv{% else %}nicht konfiguriert{% endif %}</p>
+        <p class="text-sm text-slate-400 mt-1">Telegram / Discord via .env</p>
+      </article>
+    </section>
+
+    <section class="card rounded-2xl border border-line overflow-hidden">
+      <div class="px-5 py-4 border-b border-line flex items-end justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-bold text-white">Königs-Trend-Ranking · Top {{ top_n_buy }}</h2>
+          <p class="text-sm text-slate-400">Qualität (Otte) + Kurs über GD200, sortiert nach RSL-135</p>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead class="text-slate-400 border-b border-line">
+            <tr>
+              <th class="text-left px-4 py-3">#</th>
+              <th class="text-left px-4 py-3">Aktie</th>
+              <th class="text-right px-4 py-3">Kurs</th>
+              <th class="text-right px-4 py-3">RSL</th>
+              <th class="text-right px-4 py-3">KGV</th>
+              <th class="text-right px-4 py-3">5J-KGV</th>
+              <th class="text-right px-4 py-3">Marge</th>
+              <th class="text-right px-4 py-3">ROE</th>
+              <th class="text-right px-4 py-3">D/E</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if top10 %}
+              {% for row in top10 %}
+              <tr class="border-b border-line/70 hover:bg-white/5">
+                <td class="px-4 py-3 text-gold font-semibold">{{ row.rank }}</td>
+                <td class="px-4 py-3">
+                  <div class="font-medium text-white">{{ row.ticker }}</div>
+                  <div class="text-xs text-slate-400 truncate max-w-[18rem]">{{ row.name }}</div>
+                </td>
+                <td class="px-4 py-3 text-right tabular-nums">{{ row.price|num }}</td>
+                <td class="px-4 py-3 text-right tabular-nums text-mint font-medium">{{ row.rsl|num(3) }}</td>
+                <td class="px-4 py-3 text-right tabular-nums">{{ row.trailing_pe|num(1) }}</td>
+                <td class="px-4 py-3 text-right tabular-nums">{{ row.avg_pe_5y|num(1) }}</td>
+                <td class="px-4 py-3 text-right tabular-nums">{{ row.gross_margin|pct }}</td>
+                <td class="px-4 py-3 text-right tabular-nums">{{ row.roe|pct }}</td>
+                <td class="px-4 py-3 text-right tabular-nums">{{ row.debt_to_equity|num(2) }}</td>
+              </tr>
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td colspan="9" class="px-4 py-10 text-center text-slate-400">
+                  Noch kein Ranking. Starte den ersten Scan oben rechts.
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card rounded-2xl border border-line overflow-hidden">
+      <div class="px-5 py-4 border-b border-line">
+        <h2 class="text-lg font-bold text-white">Virtuelles Depot</h2>
+        <p class="text-sm text-slate-400">Automatisch befüllt bei Top-{{ top_n_buy }}-Einstieg, Verkauf unter GD200 oder außerhalb Top {{ top_n_hold }}</p>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead class="text-slate-400 border-b border-line">
+            <tr>
+              <th class="text-left px-4 py-3">Ticker</th>
+              <th class="text-left px-4 py-3">Kaufdatum</th>
+              <th class="text-right px-4 py-3">Kaufkurs</th>
+              <th class="text-right px-4 py-3">aktuell</th>
+              <th class="text-right px-4 py-3">P/L</th>
+              <th class="text-right px-4 py-3">Rang</th>
+              <th class="text-right px-4 py-3">RSL</th>
+              <th class="text-left px-4 py-3">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if portfolio %}
+              {% for pos in portfolio %}
+              <tr class="border-b border-line/70 hover:bg-white/5">
+                <td class="px-4 py-3">
+                  <div class="font-medium text-white">{{ pos.ticker }}</div>
+                  <div class="text-xs text-slate-400">{{ pos.name }}</div>
+                </td>
+                <td class="px-4 py-3">{{ pos.buy_date|ts }}</td>
+                <td class="px-4 py-3 text-right tabular-nums">{{ pos.buy_price|num }}</td>
+                <td class="px-4 py-3 text-right tabular-nums">{{ pos.last|num }}</td>
+                <td class="px-4 py-3 text-right tabular-nums {% if pos.pnl_pct is not none and pos.pnl_pct >= 0 %}text-mint{% elif pos.pnl_pct is not none %}text-rose-300{% endif %}">
+                  {% if pos.pnl_pct is not none %}{{ pos.pnl|num }} ({{ pos.pnl_pct|pct }}){% else %}–{% endif %}
+                </td>
+                <td class="px-4 py-3 text-right">{{ pos.rank or "–" }}</td>
+                <td class="px-4 py-3 text-right tabular-nums">{{ pos.rsl|num(3) }}</td>
+                <td class="px-4 py-3">
+                  {% if not pos.above_sma200 %}
+                    <span class="text-rose-300">GD200 verletzt</span>
+                  {% elif pos.rank and pos.rank > top_n_hold %}
+                    <span class="text-amber-300">Momentum schwach</span>
+                  {% else %}
+                    <span class="text-mint">im Universum</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td colspan="8" class="px-4 py-10 text-center text-slate-400">
+                  Depot leer. Kaufsignale füllen das virtuelle Depot automatisch.
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <article class="card rounded-2xl border border-line">
+        <div class="px-5 py-4 border-b border-line">
+          <h2 class="text-lg font-bold text-white">Scan-Log</h2>
+        </div>
+        <ul class="divide-y divide-line/70 text-sm max-h-[28rem] overflow-auto">
+          {% if logs %}
+            {% for item in logs %}
+            <li class="px-5 py-3">
+              <div class="flex justify-between gap-3">
+                <span class="font-medium {% if item.status == 'ok' %}text-mint{% elif item.status == 'running' %}text-amber-300{% else %}text-rose-300{% endif %}">
+                  {{ item.status }}
+                </span>
+                <span class="text-slate-400">{{ item.started_at|ts }}</span>
+              </div>
+              <p class="text-slate-300 mt-1">{{ item.message or "–" }}</p>
+              <p class="text-xs text-slate-500 mt-1">
+                gescannt {{ item.scanned }} · Fehler {{ item.errors }}
+                {% if item.duration_sec %} · {{ "%.1f"|format(item.duration_sec) }}s{% endif %}
+              </p>
+            </li>
+            {% endfor %}
+          {% else %}
+            <li class="px-5 py-8 text-slate-400">Noch keine Läufe.</li>
+          {% endif %}
+        </ul>
+      </article>
+
+      <article class="card rounded-2xl border border-line">
+        <div class="px-5 py-4 border-b border-line">
+          <h2 class="text-lg font-bold text-white">Signale</h2>
+        </div>
+        <ul class="divide-y divide-line/70 text-sm max-h-[28rem] overflow-auto">
+          {% if signals %}
+            {% for s in signals %}
+            <li class="px-5 py-3">
+              <div class="flex justify-between gap-3">
+                <span class="font-semibold {% if s.kind == 'buy' %}text-mint{% else %}text-rose-300{% endif %}">
+                  {{ "KAUF" if s.kind == "buy" else "VERKAUF" }} · {{ s.ticker }}
+                </span>
+                <span class="text-slate-400">{{ s.created_at|ts }}</span>
+              </div>
+              <p class="text-slate-300 mt-1">{{ s.message }}</p>
+            </li>
+            {% endfor %}
+          {% else %}
+            <li class="px-5 py-8 text-slate-400">Noch keine Signale.</li>
+          {% endif %}
+        </ul>
+      </article>
+    </section>
+
+    <p class="text-xs text-slate-500 pb-8">
+      Keine Anlageberatung. Fundamentale Felder und Kurse kommen von Yahoo Finance via yfinance und können unvollständig sein.
+      Titel ohne Kennzahl fallen bewusst durch den Königsfilter.
+    </p>
+  </main>
+</body>
+</html>

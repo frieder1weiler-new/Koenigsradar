@@ -1,0 +1,23 @@
+[Unit]
+Description=Koenigs-Trend Aktien-Screener
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/aktien-screener
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/home/pi/aktien-screener/.env
+ExecStart=/home/pi/aktien-screener/.venv/bin/python /home/pi/aktien-screener/app.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+
+# Raspberry-Pi-schonend
+Nice=10
+MemoryMax=400M
+
+[Install]
+WantedBy=multi-user.target
